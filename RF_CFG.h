@@ -1,4 +1,4 @@
-/* v1.1 part of RF/COMM set */
+/* v1.2 part of RF/COMM set */
 
 #ifndef _RF_CFG_H_
 #define _RF_CFG_H_
@@ -200,7 +200,7 @@
  * Transmitter register write command 
  ***/
 #define RF12_TXWR_BASE	0xB800
-#define RF12_TXWR_CMD(BYTE)	(RF12_TXWR_BASE | ((unsigned char)BYTE))
+#define RF12_TXWR_CMD(BYTE)	(RF12_TXWR_BASE | ((unsigned int)BYTE))
 
 /* Writes 8 bits into transmitter data register */
 

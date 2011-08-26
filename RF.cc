@@ -6,7 +6,7 @@
  *
  * Configures RFM12 module and allows basic send/recv operations.
  *
- * v1.1
+ * At least v1.2
  ********************/
 
 #include <inttypes.h>
@@ -18,7 +18,7 @@
  * slave a two-directional UART.
  * Allows sharing of this file between two different devices.
  */
-#define RF_MASTER	0
+#define RF_MASTER	1
 #define RF_DEBUG	1
 
 /***
@@ -89,9 +89,9 @@
 #define RF12_CONFIG	RF12_CFG_CMD(433, 12.0, RF12_EL | RF12_EF)
 
 /* Power management */
-#define RF12_PM_DEF	RF12_PM_CMD(RF12_EX | RF12_DC | RF12_ES | RF12_EBB)
+#define RF12_PM_DEF	RF12_PM_CMD(          RF12_EBB | RF12_ES | RF12_EX | RF12_DC)
 #define RF12_PM_ECO	RF12_PM_CMD(RF12_DC)
-#define RF12_PM_TX	RF12_PM_CMD(RF12_ET | RF12_ES | RF12_EX | RF12_DC)
+#define RF12_PM_TX	RF12_PM_CMD(RF12_ET | RF12_EBB | RF12_ES | RF12_EX | RF12_DC)
 #define RF12_PM_RX	RF12_PM_CMD(RF12_ER | RF12_EBB | RF12_ES | RF12_EX | RF12_DC)
 
 /* This selects the communication channel
@@ -102,8 +102,8 @@
 /* Select data rate */
 //#define RF12_DR		RF12_DR_CMD(0x0047) /* 4.8kbps */
 //#define RF12_DR		RF12_DR_CMD(0x0021) /* 10kbps */
-//#define RF12_DR		RF12_DR_CMD(0x0010) /* 20kbps */
-#define RF12_DR		RF12_DR_CMD(0x0005) /* 50kbps */
+#define RF12_DR		RF12_DR_CMD(0x0010) /* 20kbps */
+//#define RF12_DR		RF12_DR_CMD(0x0005) /* 50kbps */
 //#define RF12_DR		RF12_DR_CMD(0x0003) /* 85kbps */
 
 
@@ -232,7 +232,7 @@ namespace RF {
 		 * fck / 32 seems ok for transmitter */
 #if RF_MASTER == 1
 		SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR1);
-		SPSR |= (1<<SPI2X);
+//		SPSR |= (1<<SPI2X);
 #else
 		SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR0);
 //		SPSR |= (1<<SPI2X); /* Double the speed */
@@ -241,7 +241,6 @@ namespace RF {
 		tmp = SPDR;
 
 		for (tmp = 0; tmp < sizeof(Config)/sizeof(*Config); tmp++) {
-/*			printf("RF: Cmd=0x%04X, num=%d\n", Config[tmp], tmp); */
 			VSendCommand(Config[tmp]);
 		}
 		VSendCommand(0x00); /* Read status */

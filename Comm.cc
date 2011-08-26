@@ -15,11 +15,11 @@
  *
  * TX/RX/CRC/Control byte might be freely compiled-in or not.
  *
- * v1.1
+ * At least v1.2
  * Code 85 cols wide.
  *
  * TX Example: (Take a look on testcases at the bottom also)
- * char *Buff = Comm::TXBuffGet();
+ * char *Buff = Comm::TXGetBuff();
  * int Length = sprintf(Buff, "Some data");
  * Comm::TXInit(Length);
  * Comm::TXWait();
@@ -47,33 +47,39 @@
  *
  * This serves as an early-frame drop function 
  * + creates a place for some higher level data bits 
- * Won't protect data integrity for sure 
+ * It won't protect data integrity inself.
  * Control byte has 4 bits free to use, and 4 duplicating
  * the length field.
  */
 #define COMM_CTR	1
 
-/* Should we use statistics? (Required for testcases) */
-#define COMM_STATS	1
-
-/* Debug */
-#define COMM_DEBUG	0
-
-/* Enable testcase compilation */
-#define COMM_TESTCASES	1
-
 /* Shall we retry TX on buffer underrun? Not well tested - beware. */
-#define COMM_TXRETRY	0
+#define COMM_TXRETRY	1
 
 /* Shall we listen for another frame after we failed to correctly receive one?
  * After the RFM sees synchronization pattern (2D D4) it starts to send data to us.
  * If the data seems incorrect we can either turn RFM off or restart receiving.
  *
- * Turning this on when CTR and CRC it turned off mostly doesn't have any sense
+ * Turning this on when CTR and CRC is turned off mostly doesn't have any sense
  * (But there's still probability that length field will be incorrect - say equal 
  * to 0)
  */
 #define COMM_RXRETRY	1
+
+/* Enable statistics for either RX, TX or both */
+#define COMM_STATS_TX	1
+#define COMM_STATS_RX	1
+
+/* Debug (printfs) */
+#define COMM_DEBUG	0
+
+/* Enable testcase compilation - requires stats compiled */
+#define COMM_TESTCASES	1
+
+
+
+/* Internal helper */
+#define COMM_ANY_STATS	(COMM_STATS_RX || COMM_STATS_TX)
 
 namespace Comm {
 /*** Tranport layer configuration ***/
@@ -198,7 +204,7 @@ namespace Comm {
 		uint16_t Status;
 
 		/* Stats */
-#if COMM_STATS
+#if COMM_ANY_STATS
 		uint32_t PacketsTX;
 		uint32_t PacketsRX;
 		uint16_t CtrErr;	/* RGUR error, lenght range error,
@@ -206,7 +212,7 @@ namespace Comm {
 #endif
 
 #if COMM_CRC
-#if COMM_STATS
+#if COMM_ANY_STATS
 		uint16_t CRCErr;	/* CRC error */
 #endif
 		/* Temporary used in RX and TX */
@@ -248,15 +254,22 @@ namespace Comm {
 	/** Initialize receiving */
 	static inline void RXInit()
 	{
-		State.Mode = Mr;
+#if COMM_TX
+		/* Ensure the interrupt is off while we configure RFM */
+		RF_IRQ_OFF();
+#endif
 		/* Swap modes and/or reset the FIFO */
+		if (RF::CurMode != RF::RX)
+			RF::Mode(RF::RX);
+
+		RF::VSendCommand(0x0000); /* Clear Status (FFOV for e.g.) */
+		State.Mode = Mr;
 #if COMM_CRC
 		State.CRC = CRCInit;
 #endif /* CRC */
 		State.RecvCur = (uint8_t *)&State.RecvBuff;
 		/* We hit this when we know the frame length and control byte */
 		State.RecvEnd = State.RecvCur + COMM_HEADSIZE - 1;
-		RF::Mode(RF::RX);
 		RF_IRQ_ON();
 	}
 
@@ -273,6 +286,19 @@ namespace Comm {
 				break;
 		}
 	}
+
+	/** Check if TX is ready */
+	static inline char RXReady(void)
+	{
+		return (State.Mode == MX) || (State.Mode == MI);
+	}
+
+	/** Return RX buffer */
+	static inline char *RXGetBuff(void)
+	{
+		return (char *)State.RecvBuff.Mesg;
+	}
+
 
 	/** Return received packet.
 	 *
@@ -313,8 +339,14 @@ namespace Comm {
 		while (State.Mode == MT);
 	}
 
+	/** Check if TX is ready */
+	static inline char TXReady(void)
+	{
+		return (State.Mode == Mt);
+	}
+
 	/** Get address to the TX buffer; */
-	static inline char *TXBuffGet(void)
+	static inline char *TXGetBuff(void)
 	{
 		return (char *)State.SendBuff.C.Packet.Mesg;
 	}
@@ -339,6 +371,11 @@ namespace Comm {
 	 */
 	static void TXInit(len_t Length)
 	{
+#if COMM_RX
+		/* Ensure the interrupt is off while we configure RFM */
+		RF_IRQ_OFF();
+#endif
+
 		/* Turn on transmitter fast so the receiver might synchronize */
 		if (RF::CurMode != RF::TX)
 			RF::Mode(RF::TX);
@@ -385,8 +422,17 @@ namespace Comm {
 			*Byte = (uint8_t)(State.CRC >> 8);
 		}
 #endif /* CRC */
+	}
 
-
+	/** Initialize RFM so it will start sending synchronization bytes already
+	 * 
+	 * Might be required only when interleaving TX/RX modes.
+	 */
+	static inline void TXPreInit(void)
+	{
+		State.Mode = MI;
+		RF_IRQ_OFF();
+		RF::Mode(RF::TX);
 	}
 #endif /* TX */
 
@@ -427,9 +473,6 @@ namespace Comm {
 			 * or RX buffer overrunned. Omit the rest of frame */
 			if (COMM_DEBUG)
 				printf("RGURERR!\n");
-#if COMM_STATS	       
-			State.CtrErr++;
-#endif /* STATS */
 
 			while (!(SPSR & (1<<SPIF))); /* Read second byte */
 			State.Status |= SPDR;
@@ -439,21 +482,29 @@ namespace Comm {
 			if (State.Mode == MT)
 #endif /* RX */
 			{
-#if COMM_TXRETRY
-				/* TODO: Debug this. */
-				State.SendCur = State.SendBuff.Raw;
-				RF::Transmit(*State.SendCur);
-#else
-				State.SendCur = State.SendEnd = NULL;
-				State.Mode = MI;
-				RF::Mode(RF::DEF);
-				RF_IRQ_OFF();
-#endif /* TXRETRY */
+#if COMM_STATS_TX
+				State.CtrErr++;
+#endif /* STATS */
+
+				if (COMM_TXRETRY) {
+					/* TODO: Debug this. */
+					State.SendCur = State.SendBuff.Raw + 1;
+					RF::Transmit(*State.SendBuff.Raw);
+				} else {
+					State.SendCur = State.SendEnd = NULL;
+					State.Mode = MI;
+					RF::Mode(RF::DEF);
+					RF_IRQ_OFF();
+				}
 				return;
 			}
 #endif /* TX */
 
 #if COMM_RX
+#if COMM_STATS_RX
+				State.CtrErr++;
+#endif /* STATS */
+
 			/* RX mode - Reset receiver; we will wait 
 			 * for another frame. */
 			goto ResetRX;
@@ -475,7 +526,7 @@ namespace Comm {
 			if (State.SendCur == State.SendEnd) {
 				/* Dummy byte already sent; shutdown transmitter */
 				State.Mode = Mt;
-#if COMM_STATS
+#if COMM_STATS_TX
 				State.PacketsTX++;
 #endif
 				/* We must leave TX on, so receiver will be 
@@ -528,7 +579,7 @@ namespace Comm {
 #if COMM_CTR
 				if (State.RecvBuff.Type.C.Control != 
 				    ((~State.RecvBuff.Length) & 0x0F)) {
-#if COMM_STATS
+#if COMM_STATS_RX
 					State.CtrErr++;
 #endif /* STATS */
 					goto ResetRX;
@@ -541,7 +592,7 @@ namespace Comm {
 				/* if (State.RecvBuff.Length < 1 ||
 				   State.RecvBuff.Length > MaxMesgSize) { */
 				if (State.RecvBuff.Length == 0) {
-#if COMM_STATS
+#if COMM_STATS_RX
 					State.CtrErr++;
 #endif /* STATS */
 					goto ResetRX;
@@ -561,7 +612,7 @@ namespace Comm {
 					/* CRC correct; Frame received! */
 					RF::Mode(RF::DEF);
 					RF_IRQ_OFF();
-#if COMM_STATS
+#if COMM_STATS_RX
 					State.PacketsRX++;
 #endif /* STATS */
 					State.Mode = MX;
@@ -570,7 +621,7 @@ namespace Comm {
 				}
 
 				/* CRC Error */
-#if COMM_STATS
+#if COMM_STATS_RX
 				State.CRCErr++;
 #endif
 				goto ResetRX;
@@ -582,20 +633,20 @@ namespace Comm {
 
 		/* Reset the RX machinery */
 	ResetRX:
-#if COMM_RXRETRY
-		RF::FIFOReset();
-		State.Mode = Mr;
+		if (COMM_RXRETRY) {
+			RF::FIFOReset();
+			State.Mode = Mr;
 #if COMM_CRC
-		State.CRC = CRCInit;
+			State.CRC = CRCInit;
 #endif /* CRC */
-		State.RecvCur = (uint8_t *)&State.RecvBuff;
-		State.RecvEnd = State.RecvCur + COMM_HEADSIZE - 1;
-#else /* RXRETRY */
-		State.Mode = MI;
-		RF::Mode(RF::DEF);
-		State.RecvCur = State.RecvEnd = NULL;
-#endif /* RXRETRY */
-
+			State.RecvCur = (uint8_t *)&State.RecvBuff;
+			State.RecvEnd = State.RecvCur + COMM_HEADSIZE - 1;
+		} else {
+			State.Mode = MI;
+			RF::Mode(RF::DEF);
+			State.RecvCur = State.RecvEnd = NULL;
+			RF_IRQ_OFF();
+		}
 #endif /* RX */
 	}
 
@@ -607,12 +658,13 @@ namespace Comm {
  * uart or LCD.
  ************************/
 
-
 #if COMM_RX
 	static inline void Testcase_RX()
 	{
 
 		unsigned int c;
+		char *Buff;
+		Comm::len_t Length;
 
 		/* Stabilize hardware */
 		Util::SDelay(1);
@@ -627,25 +679,24 @@ namespace Comm {
 			Comm::RXInit();
 			/* Wait for frame */
 			Comm::RXWait();
+			Buff = Comm::RXGetPacket(&Length);
+			Buff[Length] = '\0';
+			printf("Got; MODE=%02X; Len=%u MSG=%s\n", Comm::State.Mode, Length, Buff);
 			c++;
-			if (c%100 == 0) {
-				/* Periodically display debug */
 #if COMM_CRC
-				printf("RX: %lu Err: %u/%u\n",
-				       Comm::State.PacketsRX, 
-				       Comm::State.CtrErr,
-				       Comm::State.CRCErr);
+			printf("RX: %lu Err: %u/%u\n",
+			       Comm::State.PacketsRX, 
+			       Comm::State.CtrErr,
+			       Comm::State.CRCErr);
 #else
-				printf("RX: %lu Err: %u\n",
-				       Comm::State.PacketsRX,
-				       Comm::State.CtrErr);
+			printf("RX: %lu Err: %u\n",
+			       Comm::State.PacketsRX,
+			       Comm::State.CtrErr);
 #endif /* CRC */
 #if RF_MASTER
-				LCD::Refresh();
-				LCD::ClearScreen();
+			LCD::Refresh();
+			LCD::ClearScreen();
 #endif
-
-			}
 		}
 	}
 
@@ -725,8 +776,7 @@ namespace Comm {
 		}
 	}
 
-#endif
-
+#endif /* RF_MASTER */
 #endif /* RX */
 
 #if COMM_TX
@@ -744,7 +794,7 @@ namespace Comm {
 		Comm::Init();
 
 		/* Initialize buffer */
-		Buff = Comm::TXBuffGet();
+		Buff = Comm::TXGetBuff();
 		Length = 0x13;
 		strncpy(Buff,
 			"\x60\x61\x62\x63\x64\x65\x66\x67\x68\x69"
@@ -755,14 +805,14 @@ namespace Comm {
 		{
 			i++;
 			/* Start transmitting */
-			TXInit(Length);
+			Comm::TXInit(Length);
 			/* Wait until finish */
 			Comm::TXWait();
 
 			if (i % 100 == 0) {
 				/* Periodically display debug */
 
-				printf("PTx=%lu\n", State.PacketsTX);
+				printf("PTx=%lu\n", Comm::State.PacketsTX);
 				RF::Status();
 #if RF_MASTER
 				LCD::Refresh();
@@ -787,7 +837,7 @@ namespace Comm {
 		Comm::Init();
 
 		/* Initialize buffer */
-		Buff = Comm::TXBuffGet();
+		Buff = Comm::TXGetBuff();
 		Length = 1;
 		sei();
 		for (;;)
@@ -805,7 +855,7 @@ namespace Comm {
 				Buff[Length++] = (unsigned char)i;
 			}
 
-			TXInit(Length);
+			Comm::TXInit(Length);
 			printf("%d\n", Length);
 			Comm::TXWait();
 		}
@@ -827,7 +877,7 @@ namespace Comm {
 
 		/* Initialize buffer */
 		printf("Initializing buffer\n");
-		Buff = Comm::TXBuffGet();
+		Buff = Comm::TXGetBuff();
 		sei();
 		for (;;)
 		{
@@ -841,6 +891,87 @@ namespace Comm {
 		}
 	}
 
-
 #endif /* TX */
+
+
+#if COMM_RX && COMM_TX
+	static inline void Testcase_Interleaved(void)
+	{
+		char *Buff;
+		unsigned long i=0;
+		int Length;
+
+		/* Stabilize hardware */
+		Util::SDelay(1);
+
+		/* Start Comm module */
+		Comm::Init();
+
+		/* Initialize buffer */
+		Buff = Comm::TXGetBuff();
+		Length = 0x13;
+		strncpy(Buff,
+			"\x60\x61\x62\x63\x64\x65\x66\x67\x68\x69"
+			"\x6a\x6b\x6c\x6d\x6e\x6f\x70\x71\x72\x73", Length);
+
+		sei();
+		for (;;)
+		{
+			i++;
+			/* Start transmitting */
+			TXInit(Length);
+			/* Wait until finish */
+			Comm::TXWait();
+
+			/* Swap mode to RX */
+			Comm::RXInit();
+
+			/* Wait some time */
+			int WaitCnt = 0;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+			if (Comm::State.Mode != MX) _delay_ms(5), WaitCnt++;
+
+			/* Pre initialize TX */
+			Comm::TXPreInit();
+
+
+#if COMM_CRC
+#if !RF_MASTER
+			printf("TX/RX %lu/%lu Err: %u/%u W: %d\n",
+			       Comm::State.PacketsTX,
+			       Comm::State.PacketsRX, 
+			       Comm::State.CtrErr,
+			       Comm::State.CRCErr,
+			       WaitCnt);
+#else
+			printf("\x01TX/RX %lu/%lu  \nErr: %u/%u W:%d \n",
+			       Comm::State.PacketsTX,
+			       Comm::State.PacketsRX, 
+			       Comm::State.CtrErr,
+			       Comm::State.CRCErr,
+			       WaitCnt);
+#endif
+#else
+			printf("TX/RX: %lu Err: %u\n",
+			       Comm::State.PacketsTX,
+			       Comm::State.PacketsRX,
+			       Comm::State.CtrErr);
+#endif /* CRC */
+
+#if RF_MASTER
+			LCD::Refresh();
+			LCD::ClearScreen();
+#endif /* RF_MASTER  */
+		}
+	}
+#endif /* TX + RX */
+
+
 }
