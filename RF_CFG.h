@@ -1,4 +1,4 @@
-/* v1.0beta part of RF/COMM set */
+/* v1.1 part of RF/COMM set */
 
 #ifndef _RF_CFG_H_
 #define _RF_CFG_H_

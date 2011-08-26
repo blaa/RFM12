@@ -15,7 +15,7 @@
  *
  * TX/RX/CRC/Control byte might be freely compiled-in or not.
  *
- * v1.0beta
+ * v1.1
  * Code 85 cols wide.
  *
  * TX Example: (Take a look on testcases at the bottom also)
@@ -265,12 +265,13 @@ namespace Comm {
 	 */
 	static inline void RXWait(void)
 	{
+		for (;;) {
 			/* Should be Interrupt safe */
 			if (State.Mode == MI)
 				break;
 			if (State.Mode == MX)
 				break;
-
+		}
 	}
 
 	/** Return received packet.

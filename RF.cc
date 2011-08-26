@@ -6,7 +6,7 @@
  *
  * Configures RFM12 module and allows basic send/recv operations.
  *
- * v1.0beta
+ * v1.1
  ********************/
 
 #include <inttypes.h>
