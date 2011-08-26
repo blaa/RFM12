@@ -88,9 +88,10 @@
 /* Global config */
 #define RF12_CONFIG	RF12_CFG_CMD(433, 12.0, RF12_EL | RF12_EF)
 
-/* Power management */
+/** Power management */
 #define RF12_PM_DEF	RF12_PM_CMD(          RF12_EBB | RF12_ES | RF12_EX | RF12_DC)
 #define RF12_PM_ECO	RF12_PM_CMD(RF12_DC)
+/* If you don't use interleaved communication you can simplify those (increases switching time) */
 #define RF12_PM_TX	RF12_PM_CMD(RF12_ET | RF12_EBB | RF12_ES | RF12_EX | RF12_DC)
 #define RF12_PM_RX	RF12_PM_CMD(RF12_ER | RF12_EBB | RF12_ES | RF12_EX | RF12_DC)
 
@@ -123,10 +124,15 @@
 //#define RF12_BATT	RF12_BATT_CMD(1_66, 0) /* from Datasheet */
 #define RF12_BATT	RF12_BATT_CMD(10, 0) /* From library */
 
+/** RFM12 configuration/control subsystem */
 namespace RF {
+	/** RF modes */
 	enum RF_Mode {TX, RX, DEF, ECO} CurMode;
 
+	/** Temporary value; used for clearing SPIF flag */
 	static uint16_t SC_tmp;
+
+	/** Send a command to RFM, return reply */
 	static inline uint16_t SendCommand(const uint16_t Cmd)
 	{
 		RF_SS_LOW();
@@ -144,6 +150,7 @@ namespace RF {
 		return SC_tmp;
 	}
 
+	/** Send a command, ignore reply */
 	static inline void VSendCommand(const uint16_t Cmd)
 	{
 		RF_SS_LOW();
@@ -160,6 +167,7 @@ namespace RF {
 		RF_SS_HIGH();
 	}
 
+	/** Set RFM working mode (TX, RX, DEF, ECO) */
 	static inline void Mode(enum RF_Mode Mode)
 	{
 		CurMode = Mode;
@@ -182,23 +190,28 @@ namespace RF {
 		}
 	}
 
+	/** Send a byte over radio with RFM */
 	static inline void Transmit(uint8_t Byte)
 	{
 		VSendCommand(RF12_TXWR_CMD(Byte));
 	}
 
+	/** Wait for interrupt, and then read incoming buffer */
 	static inline uint16_t Receive()
 	{
 		while (RF_IRQ_PIN & RF_IRQ_MASK);
 		return SendCommand(RF12_RXRD_CMD());
 	}
 
+	/** Turn FIFO off/on so it will need
+	 *  synchro bytes to start gathering data */
 	static inline void FIFOReset(void)
 	{
 		VSendCommand(RF12_FIFO_OFF);
 		VSendCommand(RF12_FIFO_ON);
 	}
 
+	/** Initialize RFM */
 	static inline void Init(void)
 	{
 		uint8_t tmp;
@@ -232,7 +245,7 @@ namespace RF {
 		 * fck / 32 seems ok for transmitter */
 #if RF_MASTER == 1
 		SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR1);
-//		SPSR |= (1<<SPI2X);
+		SPSR |= (1<<SPI2X);
 #else
 		SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR0);
 //		SPSR |= (1<<SPI2X); /* Double the speed */
@@ -241,6 +254,7 @@ namespace RF {
 		tmp = SPDR;
 
 		for (tmp = 0; tmp < sizeof(Config)/sizeof(*Config); tmp++) {
+/*			printf("RF: Cmd=0x%04X, num=%d\n", Config[tmp], tmp); */
 			VSendCommand(Config[tmp]);
 		}
 		VSendCommand(0x00); /* Read status */
@@ -248,6 +262,7 @@ namespace RF {
 
 #if RF_DEBUG
 #if RF_MASTER
+	/** Debug function - reads status and prints it on LCD */
 	void Status(void)
 	{
 		uint16_t tmp;
@@ -280,6 +295,7 @@ namespace RF {
 		LCD::Refresh();
 	}
 #else
+	/** Debug function - reads status and prints over serial */
 	void Status(void)
 	{
 		uint16_t tmp;

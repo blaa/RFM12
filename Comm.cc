@@ -47,7 +47,7 @@
  *
  * This serves as an early-frame drop function 
  * + creates a place for some higher level data bits 
- * It won't protect data integrity inself.
+ * It won't protect data integrity itself.
  * Control byte has 4 bits free to use, and 4 duplicating
  * the length field.
  */
@@ -81,26 +81,26 @@
 /* Internal helper */
 #define COMM_ANY_STATS	(COMM_STATS_RX || COMM_STATS_TX)
 
+/** RF Communication subsystem */
 namespace Comm {
 /*** Tranport layer configuration ***/
 
-	/* Type of size field: uint8_t for <= 255, uint16_t for <= 65536.
+	/** Type of size field: uint8_t for <= 255, uint16_t for <= 65536.
 	 * Changing this also requires some changes to the interrupt handling.
 	 * */
 	typedef uint8_t		len_t;
 
-	/* CRC type */
 #if COMM_CRC
-	typedef uint16_t	crc_t;
-	const crc_t CRCInit	= 0xFFFF;
+	typedef uint16_t	crc_t;		/**< CRC type */
+	const crc_t CRCInit	= 0xFFFF; 	/**< Initial CRC value */
 #endif
 
- 	/* Control byte type */
 #if COMM_CTR
-	typedef uint8_t		ctr_t;
+
+	typedef uint8_t		ctr_t;		/**< Control byte type */
 #endif
 
-	/* Maximal size of data which can be transfered in one packet.
+	/** Maximal size of data which can be transfered in one packet.
 	 * See CHECK0 */
 	const int MaxMesgSize	= 256;
 
@@ -119,19 +119,20 @@ namespace Comm {
 
 #define COMM_PACKETSIZE (COMM_HEADSIZE + COMM_TAILSIZE)
 
-	/* Frame synchronization data */
+
 #if COMM_TX
+	/* Frame synchronization data */
 #	define SynchData {0xAA, 0xAA, 0x2D, 0xD4}
-	const uint8_t SynchSize = 4;
+	const uint8_t SynchSize = 4;			/**< Synchronization size */
 #endif /* TX */
 
-	/* Structure of a packet */
+	/** Structure of a packet */
 	typedef struct {
-		/* Message length */
+		/** Message length */
 		len_t Length;
 
-		/* Packet type description */
 #if COMM_CTR
+		/** Packet type description */
 		union {
 			ctr_t Raw;
 			struct {
@@ -141,19 +142,20 @@ namespace Comm {
 		} Type;
 #endif /* CTR */
 
-		/* Message body + 16 bit CRC at the end */
+		/** Message body + 16 bit CRC at the end */
 		char Mesg[MaxMesgSize + COMM_TAILSIZE];
 	} packet_t;
 
 #if COMM_TX
-	/* Structure of a frame (frame = synch + packet) */
+	/** Structure of a frame (frame = synch + packet) */
 	typedef union {
-		/* Raw frame */
+		/** Raw frame access */
 		uint8_t Raw[SynchSize + sizeof(packet_t)];
+		/** Packet/Synch access */
 		struct {
-			/* Constant frame synchronization pattern */
+			/** Constant frame synchronization pattern */
 			uint8_t Synch[SynchSize];
-			/* Packet body */
+			/** Packet body */
 			packet_t Packet;
 		} C;
 	} frame_t;
@@ -186,7 +188,7 @@ namespace Comm {
 	};
 
 
-	/*** State ***/
+	/** Comm state */
 	static volatile struct {
 		/* Buffers */
 #if COMM_TX
@@ -230,7 +232,7 @@ namespace Comm {
 	/***
 	 * General functions
 	 ***/
-	/* Enter idle mode */
+	/** Enter idle mode */
 	static inline void Idle(void)
 	{
 		RF_IRQ_OFF();
@@ -659,6 +661,7 @@ namespace Comm {
  ************************/
 
 #if COMM_RX
+	/** Comm testcase */
 	static inline void Testcase_RX()
 	{
 
@@ -701,7 +704,7 @@ namespace Comm {
 	}
 
 #if RF_MASTER
-	/* Simulate a terminal 
+	/** Simulate a terminal 
 	 * Data received via RF are shown on LCD.
 	 * ~ clears screen, when screen is full it's cleared.
 	 * Statistics shown on the last line.
@@ -780,6 +783,7 @@ namespace Comm {
 #endif /* RX */
 
 #if COMM_TX
+	/** Comm testcase */
 	static inline void Testcase_TX(void)
 	{
 		/* We should be able to use printf() - some uart or something */
@@ -822,7 +826,7 @@ namespace Comm {
 		}
 	}
 
-	/* Transmit in packets what you get via UART 
+	/** Transmit in packets what you get via UART 
 	 * Warning: getchar() non-blocking */
 	static inline void Testcase_UART_TX(void)
 	{
@@ -861,7 +865,7 @@ namespace Comm {
 		}
 	}
 
-	/* Send same text with counter over and over */
+	/** Send same text with counter over and over */
 	static inline void Testcase_AUTO_UART_TX(void)
 	{
 		char *Buff;
@@ -895,6 +899,7 @@ namespace Comm {
 
 
 #if COMM_RX && COMM_TX
+	/** Comm testcase, interleaved TX/RX */
 	static inline void Testcase_Interleaved(void)
 	{
 		char *Buff;
